@@ -1,0 +1,110 @@
+---
+title: "WNIT"
+author: "Dianne Waterson"
+date: "September 10, 2016"
+output:
+  html_document:
+    theme: default
+    keep_md: true
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r filesize, include=FALSE}
+filesize <- file.info("WNIT3rdRnd_WomensNIT_UNCvUCLA_12.out")$size/1024/1024
+size <- paste(filesize, "MegaBytes")
+```
+
+### Introduction
+
+#####This is a first pass word frequency analysis of tweets from the Women's National Invitation Tournament or WNIT. More information about WNIT can be found [here](http://www.womensnit.com/). This analysis is performed as part of Exogend's Twitter Data Analytics proof-of-concept project.
+
+### Data
+
+#####The file size of file "WNIT3rdRnd_WomensNIT_UNCvUCLA_12.out" is `r size`. This file contains the BOM or Byte Order Mark found at the beginning of the file and signifies the file is unicode. This is great but is a headache when processing text as it appear as "U+FEFF" in the string as what I believe is an HTML tag as it is enclosed in carrot brackets. I found a quick solution that requires opening the file in NotePad++ and resaving as UTF-8 without BOM. The file without the BOM is called "WomensNIT noBOM.txt". We need a more robust solution to process very large file sizes. Based on my research, the BOM plagues all programming languages; R, Python, Linux, JavaScript, etc. The BOM is really "0xEF,0xBB,0xBF". There are various regex solutions on the internet to try in the near future.
+
+#####The data are in JSON format and can be read into a data frame quite nicely using the jsonlite package. Further processing to get the final word list includes removing URL, punctuation, numbers and stopwords. There still exists the ellipsis before or after some words in the word list, e.g. "quar.". Further evaluation shows the ellipsis to be the Unicode character "U+0085". There are also word concatentations, e.g. "usmgoldeneagles", and abbreviations, e.g. "miss" for Mississippi.
+
+#####A later project may be to see if the tweets can be extracted from Twitter in such a way the data are already or mostly cleaned and the BOM removed along with the ellipsis unicode character. The ndjson package has functionality to stream in from an http .gz file. This package requires compiling before use and could be an option.
+
+### Exploring
+
+#####Let's stream in the data into a data frame object and time how long it takes to read in 1 MByte of data. We will also see the data frame column names and a sample of tweets. The column names indicate the information available from these data. Some columns are data frames themselves. For example the column "coordinates" is a data frame containing 255 observations of 2 variables. Looking at the tweets presents a sample of data cleaning opportunities. Lastly, the class() function validates the object containing the data is indeed a data frame.
+
+```{r explore}
+library(jsonlite)
+fname <- "WomensNIT noBOM.txt"
+json_file <- fname
+system.time(wnit <- stream_in(file(json_file)))
+colnames(wnit)
+head(wnit$text)
+class(wnit)
+```
+
+
+```{r clean, include=FALSE}
+library(jsonlite)
+fname <- "WomensNIT noBOM.txt"
+json_file <- fname
+system.time(wnit <- stream_in(file(json_file)))
+wnitTweets <- wnit$text
+library (devtools)
+install_github("trinker/qdapRegex")
+library(qdapRegex)
+wnitTweets <- rm_url(wnitTweets, pattern = pastex("@rm_twitter_url", "@rm_url"))
+library(tm)
+wnitCorp <- VCorpus(VectorSource(wnitTweets))
+wnitTdm <- TermDocumentMatrix(wnitCorp,
+                          control = list(removePunctuation = TRUE,
+                                         removeNumbers = TRUE,
+                                         stopwords = TRUE))
+
+docN <- nDocs(wnitTdm)
+termsN <- nTerms(wnitTdm)
+termsList <- Terms(wnitTdm)
+
+m = as.matrix(wnitTdm)
+word_freqs = sort(rowSums(m), decreasing=TRUE) 
+dm = data.frame(word=names(word_freqs), freq=word_freqs)
+library(wordcloud); library(RColorBrewer)
+wc <- wordcloud(dm$word, dm$freq, random.order=FALSE, colors=brewer.pal(8, "Dark2"))
+
+library(ggplot2)
+wf <- data.frame(word = names(word_freqs), freq = word_freqs)
+wf10 <- wf[1:10,]
+g <- ggplot(wf10, aes(reorder(word, -freq), freq))
+g <- g + geom_bar(stat = "identity", fill = I("skyblue"))
+g <- g + labs(x = "Top 20 Most Frequent Words", y = "Frequency")
+g <- g + theme_bw()
+g <- g + theme(axis.text.x = element_text(angle = 90, size = 12, hjust = 1))
+```
+
+### Cleaning
+
+#####As previously mentioned, further processing to get the final word list includes removing URL, punctuation, numbers and stopwords. Upon completion of these tasks, there still exists the ellipsis before or after some words in the word list, e.g. "quar.". Further evaluation shows the ellipsis to be the Unicode character "U+0085". There are also word concatentations, e.g. "usmgoldeneagles", and abbreviations, e.g. "miss" for Mississippi. This means there are more work to be done, but will use the resulting data set as it is for now to get a glimpse of what we have for the project in the following two sections.
+
+### Word Cloud
+
+#####The tm package is used to create a term document matrix from which word frequencies can be calculated. The term document matrix contains `r docN` documents. These are the number of tweets captured. The corpus contains `r termsN` unique terms or words. The term list is as follows.
+
+```{r termsList, echo=FALSE}
+termsList
+```
+
+#####The word cloud presents the higher frequency words in larger font and conversely, the lower frequency words in smaller font. I like it because its a nice colorful visualization.
+
+```{r wordcloud, echo=FALSE}
+wordcloud(dm$word, dm$freq, random.order=FALSE, colors=brewer.pal(8, "Dark2"))
+```
+
+### Bar Plot
+
+#####Although I enjoy the colors, the bar plot allows us to visualize better the relative differences in word frequencies. It aligns with the cloud presentation, but the relative bar heights help to see the Pareto distribution present in text analyses.
+
+```{r barplot, echo=FALSE}
+print(g)
+```
+
